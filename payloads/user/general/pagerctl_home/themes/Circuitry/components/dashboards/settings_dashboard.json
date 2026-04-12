@@ -1,0 +1,223 @@
+{
+  "screen_name": "settings",
+  "bg_image": "assets/settings_bg.png",
+  "title": "Settings",
+  "font_size": 18,
+  "title_size": 24,
+  "row_height": 22,
+  "left_x": 20,
+  "right_x": 180,
+  "y_start": 52,
+  "colors": {
+    "title": [100, 200, 255],
+    "category": [180, 180, 180],
+    "category_selected": [255, 220, 50],
+    "label": [180, 180, 180],
+    "value": [100, 200, 255],
+    "value_selected": [255, 220, 50],
+    "dim": [100, 100, 100]
+  },
+  "categories": [
+    {
+      "id": "display",
+      "label": "Display",
+      "items": [
+        {
+          "label": "Brightness",
+          "key": "brightness",
+          "type": "cycle",
+          "options": [25, 50, 75, 100],
+          "suffix": "%",
+          "apply": "brightness"
+        },
+        {
+          "label": "Dim Brightness",
+          "key": "dim_brightness",
+          "type": "cycle",
+          "options": [20, 30, 40, 50, 60],
+          "suffix": "%"
+        },
+        {
+          "label": "Dim Timeout",
+          "key": "dim_timeout",
+          "type": "cycle",
+          "options": [0, 10, 30, 60, 120, 300],
+          "formatter": "seconds"
+        },
+        {
+          "label": "Screen Timeout",
+          "key": "screen_timeout",
+          "type": "cycle",
+          "options": [0, 30, 60, 120, 300, 600],
+          "formatter": "seconds"
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "label": "General",
+      "items": [
+        {
+          "label": "Vibrate",
+          "key": "vibrate_enabled",
+          "type": "toggle"
+        },
+        {
+          "label": "Test Vibrate",
+          "type": "action",
+          "action": "test_vibrate"
+        },
+        {
+          "label": "Test Beep",
+          "type": "action",
+          "action": "test_beep"
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "label": "Sound",
+      "items": [
+        {
+          "label": "Sound",
+          "key": "sound_enabled",
+          "type": "toggle"
+        },
+        {
+          "label": "Wardrive Clicks",
+          "key": "geiger_sound",
+          "type": "toggle"
+        },
+        {
+          "label": "Boot Sound",
+          "key": "boot_sound",
+          "type": "cycle",
+          "source_dir": "/lib/pager/ringtones",
+          "extension": ".rtttl",
+          "include_none": true
+        },
+        {
+          "label": "Alert Sound",
+          "key": "alert_sound",
+          "type": "cycle",
+          "source_dir": "/lib/pager/ringtones",
+          "extension": ".rtttl",
+          "include_none": true
+        },
+        {
+          "label": "Low Battery Sound",
+          "key": "low_battery_sound",
+          "type": "cycle",
+          "source_dir": "/lib/pager/ringtones",
+          "extension": ".rtttl",
+          "include_none": true
+        },
+        {
+          "label": "Critical Battery Sound",
+          "key": "critical_battery_sound",
+          "type": "cycle",
+          "source_dir": "/lib/pager/ringtones",
+          "extension": ".rtttl",
+          "include_none": true
+        },
+        {
+          "label": "Power Connected Sound",
+          "key": "power_connected_sound",
+          "type": "cycle",
+          "source_dir": "/lib/pager/ringtones",
+          "extension": ".rtttl",
+          "include_none": true
+        },
+        {
+          "label": "Preview Boot Sound",
+          "type": "action",
+          "action": "preview",
+          "source": "boot_sound"
+        },
+        {
+          "label": "Preview Alert Sound",
+          "type": "action",
+          "action": "preview",
+          "source": "alert_sound"
+        }
+      ]
+    },
+    {
+      "id": "gps",
+      "label": "GPS",
+      "items": [
+        {
+          "label": "GPS",
+          "key": "gps_enabled",
+          "type": "toggle"
+        },
+        {
+          "label": "Baud",
+          "key": "gps_baud",
+          "type": "cycle",
+          "options": ["auto", 4800, 9600, 38400, 115200]
+        }
+      ]
+    },
+    {
+      "id": "wifi",
+      "label": "WiFi",
+      "items": [
+        {
+          "label": "Scan 2.4GHz",
+          "key": "scan_2_4ghz",
+          "type": "toggle"
+        },
+        {
+          "label": "Scan 5GHz",
+          "key": "scan_5ghz",
+          "type": "toggle"
+        },
+        {
+          "label": "Scan 6GHz",
+          "key": "scan_6ghz",
+          "type": "toggle"
+        }
+      ]
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "items": [
+        {
+          "label": "Wardrive Autostart",
+          "key": "wardrive_autostart",
+          "type": "toggle"
+        },
+        { "label": "gpsd",        "type": "service", "service_name": "gpsd" },
+        { "label": "sshd",        "type": "service", "service_name": "sshd" },
+        { "label": "bluetoothd",  "type": "service", "service_name": "bluetoothd" },
+        { "label": "atd",         "type": "service", "service_name": "atd" },
+        { "label": "cron",        "type": "service", "service_name": "cron", "process_name": "crond" },
+        { "label": "autossh",     "type": "service", "service_name": "autossh" },
+        { "label": "openvpn",     "type": "service", "service_name": "openvpn" }
+      ]
+    },
+    {
+      "id": "system",
+      "label": "System",
+      "items": [
+        {
+          "label": "Web UI",
+          "key": "web_server",
+          "type": "toggle"
+        },
+        {
+          "label": "Backup Settings",
+          "type": "action",
+          "action": "backup"
+        },
+        {
+          "label": "Restore Settings",
+          "type": "action",
+          "action": "restore"
+        }
+      ]
+    }
+  ]
+}

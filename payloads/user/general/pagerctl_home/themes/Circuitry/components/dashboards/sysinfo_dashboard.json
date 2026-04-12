@@ -1,0 +1,39 @@
+{
+  "screen_name": "sysinfo",
+  "bg_image": "assets/sysinfo_bg.png",
+  "font_size": 21,
+  "row_height": 24,
+  "label_gap": 4,
+  "colors": {
+    "label": [50, 80, 50],
+    "value": [10, 30, 10],
+    "warn":  [120, 70, 0],
+    "alert": [140, 20, 20]
+  },
+  "columns": [
+    {
+      "x": 40,
+      "y_start": 50,
+      "rows": [
+        { "label": "CPU",   "source": "cpu",    "color_source": "cpu_pct",  "warn": 60, "alert": 85 },
+        { "label": "Mem",   "source": "mem",    "color_source": "mem_pct",  "warn": 60, "alert": 80 },
+        { "label": "Temp",  "source": "temp",   "color_source": "temp_val", "warn": 50, "alert": 70 },
+        { "label": "Disk",  "source": "disk" },
+        { "label": "Up",    "source": "uptime" },
+        { "label": "Procs", "source": "procs" }
+      ]
+    },
+    {
+      "x": 220,
+      "y_start": 50,
+      "rows": [
+        { "label": "Host", "source": "hostname" },
+        { "label_source": "if_name_0", "source": "if_val_0" },
+        { "label_source": "if_name_1", "source": "if_val_1" },
+        { "label": "USB",  "source": "usb_0", "max_length": 14 },
+        { "label": "USB",  "source": "usb_1", "max_length": 14 },
+        { "label": "Ker",  "source": "kernel", "max_length": 12 }
+      ]
+    }
+  ]
+}

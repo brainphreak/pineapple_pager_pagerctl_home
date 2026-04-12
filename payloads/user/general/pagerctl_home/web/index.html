@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Pagerctl Home</title>
+    <link rel="stylesheet" href="/web/css/pagerctl.css">
+</head>
+<body>
+    <nav id="nav">
+        <a href="#dashboard" data-tab="dashboard" class="nav-item active">
+            <span class="nav-icon">&#9876;</span>
+            <span class="nav-label">Dashboard</span>
+        </a>
+        <a href="#display" data-tab="display" class="nav-item">
+            <span class="nav-icon">&#9638;</span>
+            <span class="nav-label">Display</span>
+        </a>
+        <a href="#terminal" data-tab="terminal" class="nav-item">
+            <span class="nav-icon">&gt;_</span>
+            <span class="nav-label">Terminal</span>
+        </a>
+    </nav>
+
+    <div id="toast-container"></div>
+
+    <main id="content">
+        <section id="tab-dashboard" class="tab-panel"></section>
+        <section id="tab-display" class="tab-panel"></section>
+        <section id="tab-terminal" class="tab-panel"></section>
+    </main>
+
+    <script src="/web/scripts/app.js"></script>
+    <script src="/web/scripts/dashboard.js"></script>
+    <script src="/web/scripts/display.js"></script>
+    <script src="/web/scripts/terminal.js"></script>
+</body>
+</html>

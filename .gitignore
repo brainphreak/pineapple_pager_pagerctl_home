@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# User runtime state — never commit these, they are per-device
+payloads/user/general/pagerctl_home/wardrive/settings.json
+payloads/user/general/pagerctl_home/wardrive/settings.json.bak
+payloads/user/general/pagerctl_home/wardrive/settings.json.tmp
+payloads/user/general/pagerctl_home/wardrive/settings_*.bak.json
+payloads/user/general/pagerctl_home/settings.json
+
+# Runtime logs / temp
+/tmp/
+*.log
