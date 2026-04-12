@@ -1,7 +1,6 @@
 {
   "screen_name": "wardrive",
   "bg_image": "assets/alert_dialog_bg_term_blue.png",
-  "title": { "text": "Wardrive", "x": "center", "y": 6, "fs": 22, "color": "cyan", "font": "title" },
   "colors": {
     "label":  [120, 120, 120],
     "value":  [255, 255, 255],

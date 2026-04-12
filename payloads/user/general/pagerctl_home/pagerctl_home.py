@@ -63,6 +63,48 @@ def load_settings():
     return defaults
 
 
+def _install_wifi_safety_net():
+    """Install a boot-time init.d script that disables the hotspot AP
+    interface on every boot.
+
+    This is a recovery mechanism: if the user enables the hotspot and
+    it breaks SSH access (e.g., takes down the client interface they
+    were reaching over), power-cycling the pager reboots, this script
+    runs at boot, disables the hotspot, and the client interface comes
+    back — giving the user SSH/web access to fix things.
+
+    Only touches the two hotspot-related uci keys; the client config
+    (ssid, key) is preserved across reboots.
+
+    Idempotent: no-op if the script is already installed with the same
+    content."""
+    script_path = '/etc/init.d/pagerctl_wifi_safety'
+    script = (
+        "#!/bin/sh /etc/rc.common\n"
+        "# Pagerctl Home wireless safety rollback.\n"
+        "# Runs on every boot to disable the AP hotspot so a broken\n"
+        "# hotspot config never persists across a reboot.\n"
+        "START=95\n"
+        "boot() {\n"
+        "    uci set wireless.wlan0wpa.disabled='1' 2>/dev/null\n"
+        "    uci set wireless.wlan0cli.disabled='0' 2>/dev/null\n"
+        "    uci commit wireless 2>/dev/null\n"
+        "    wifi reload 2>/dev/null\n"
+        "}\n"
+    )
+    try:
+        if os.path.isfile(script_path):
+            with open(script_path) as f:
+                if f.read() == script:
+                    return
+        with open(script_path, 'w') as f:
+            f.write(script)
+        os.chmod(script_path, 0o755)
+        subprocess.run([script_path, 'enable'], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
 def _mark_wardrive_stopped():
     """Before a full exit (shutdown or bootloader), persist
     was_scanning=False and stop the scanner threads so the next
@@ -196,6 +238,9 @@ def main():
         pager.set_brightness(config.get('brightness', 80))
     except Exception:
         pass
+
+    # Install the boot-time wireless safety rollback (idempotent)
+    _install_wifi_safety_net()
 
     # Start DuckyScript API server on /tmp/api.sock
     api = api_server.start(pager, THEME_DIR)

@@ -11,6 +11,7 @@ gzipped static file serving, client-side rendering (no Flask/WS).
 
 import os
 import io
+import base64
 import gzip
 import json
 import queue
@@ -110,6 +111,31 @@ class PagerHandler(BaseHTTPRequestHandler):
         # Silence default HTTP log spam
         pass
 
+    def _check_auth(self):
+        """Enforce HTTP Basic Auth if web_password is set in config.
+        Empty password = open access (backward compat)."""
+        try:
+            pwd = load_config().get('web_password', '') or ''
+        except Exception:
+            pwd = ''
+        if not pwd:
+            return True
+        header = self.headers.get('Authorization', '')
+        if not header.startswith('Basic '):
+            return False
+        try:
+            raw = base64.b64decode(header[6:]).decode('utf-8', errors='replace')
+            _user, _, password = raw.partition(':')
+        except Exception:
+            return False
+        return password == pwd
+
+    def _send_auth_challenge(self):
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="Pagerctl Home"')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def _send_bytes(self, status, ctype, body, headers=None, gzip_ok=False):
         if gzip_ok and isinstance(body, (bytes, bytearray)) and self._accepts_gzip():
             buf = io.BytesIO()
@@ -147,6 +173,8 @@ class PagerHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_GET(self):
+        if not self._check_auth():
+            return self._send_auth_challenge()
         path = self.path.split('?', 1)[0]
 
         if path in ('/', '/index.html'):
@@ -171,6 +199,8 @@ class PagerHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_POST(self):
+        if not self._check_auth():
+            return self._send_auth_challenge()
         path = self.path.split('?', 1)[0]
 
         if path.startswith('/api/button/'):

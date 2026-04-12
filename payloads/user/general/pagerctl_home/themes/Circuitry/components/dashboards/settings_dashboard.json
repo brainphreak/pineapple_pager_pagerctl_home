@@ -58,16 +58,6 @@
       "label": "General",
       "items": [
         {
-          "label": "Vibrate",
-          "key": "vibrate_enabled",
-          "type": "toggle"
-        },
-        {
-          "label": "Test Vibrate",
-          "type": "action",
-          "action": "test_vibrate"
-        },
-        {
           "label": "Test Beep",
           "type": "action",
           "action": "test_beep"
@@ -82,6 +72,16 @@
           "label": "Sound",
           "key": "sound_enabled",
           "type": "toggle"
+        },
+        {
+          "label": "Vibrate",
+          "key": "vibrate_enabled",
+          "type": "toggle"
+        },
+        {
+          "label": "Test Vibrate",
+          "type": "action",
+          "action": "test_vibrate"
         },
         {
           "label": "Wardrive Clicks",
@@ -107,14 +107,6 @@
         {
           "label": "Low Battery Sound",
           "key": "low_battery_sound",
-          "type": "cycle",
-          "source_dir": "/lib/pager/ringtones",
-          "extension": ".rtttl",
-          "include_none": true
-        },
-        {
-          "label": "Critical Battery Sound",
-          "key": "critical_battery_sound",
           "type": "cycle",
           "source_dir": "/lib/pager/ringtones",
           "extension": ".rtttl",
@@ -152,10 +144,20 @@
           "type": "toggle"
         },
         {
+          "label": "Device",
+          "type": "action",
+          "action": "gps_pick_device"
+        },
+        {
           "label": "Baud",
           "key": "gps_baud",
           "type": "cycle",
           "options": ["auto", 4800, 9600, 38400, 115200]
+        },
+        {
+          "label": "Restart gpsd",
+          "type": "action",
+          "action": "gps_restart"
         }
       ]
     },
@@ -164,17 +166,43 @@
       "label": "WiFi",
       "items": [
         {
-          "label": "Scan 2.4GHz",
+          "label": "Connected",
+          "type": "action",
+          "action": "wifi_status"
+        },
+        {
+          "label": "Scan & Connect",
+          "type": "action",
+          "action": "wifi_scan_connect"
+        },
+        {
+          "label": "Hotspot",
+          "type": "action",
+          "action": "wifi_hotspot_toggle"
+        },
+        {
+          "label": "Hotspot SSID",
+          "key": "hotspot_ssid",
+          "type": "edit_string"
+        },
+        {
+          "label": "Hotspot Password",
+          "key": "hotspot_password",
+          "type": "edit_string",
+          "secret": true
+        },
+        {
+          "label": "Wardrive 2.4GHz",
           "key": "scan_2_4ghz",
           "type": "toggle"
         },
         {
-          "label": "Scan 5GHz",
+          "label": "Wardrive 5GHz",
           "key": "scan_5ghz",
           "type": "toggle"
         },
         {
-          "label": "Scan 6GHz",
+          "label": "Wardrive 6GHz",
           "key": "scan_6ghz",
           "type": "toggle"
         }
@@ -206,6 +234,18 @@
           "label": "Web UI",
           "key": "web_server",
           "type": "toggle"
+        },
+        {
+          "label": "Web UI Port",
+          "key": "web_port",
+          "type": "cycle",
+          "options": [1337, 8080, 8088, 8888, 80]
+        },
+        {
+          "label": "Web UI Password",
+          "key": "web_password",
+          "type": "edit_string",
+          "secret": true
         },
         {
           "label": "Backup Settings",

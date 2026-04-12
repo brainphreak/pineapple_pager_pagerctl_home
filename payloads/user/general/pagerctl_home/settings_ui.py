@@ -18,6 +18,9 @@ import subprocess
 from wardrive.config import (load_config, save_config, SETTINGS_FILE,
                               backup_settings, list_backups, restore_backup)
 from wardrive.web_server import wait_any_button
+from wardrive.gps_utils import (detect_gps_devices, get_device_name,
+                                 short_device_label)
+from wardrive import wifi_utils
 
 
 FONT_MENU = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wardrive', 'fonts', 'menu.ttf')
@@ -257,6 +260,11 @@ class SettingsUI:
             run_s = 'Run' if run else 'Stop'
             en_s = 'Auto' if en else 'Man'
             return f'{run_s}/{en_s}'
+        if t == 'edit_string':
+            val = self.config.get(item.get('key', ''), '')
+            if item.get('secret'):
+                return 'set' if val else 'not set'
+            return str(val) if val else '-'
         return str(self.config.get(item.get('key'), ''))
 
     def _format_scalar(self, val, item):
@@ -319,28 +327,173 @@ class SettingsUI:
             self._run_action(item)
         elif t == 'service':
             self._service_picker(item)
+        elif t == 'edit_string':
+            self._edit_string(item)
+
+    # -- On-screen keyboard for text input --
+
+    _KB_ROWS = [
+        ['1','2','3','4','5','6','7','8','9','0','BK'],
+        ['q','w','e','r','t','y','u','i','o','p','SP'],
+        ['a','s','d','f','g','h','j','k','l','.','OK'],
+        ['z','x','c','v','b','n','m','-','_','@','X'],
+    ]
+    _KB_ACTIONS = {'BK', 'SP', 'OK', 'X'}
+
+    def _edit_string(self, item):
+        """On-screen keyboard dialog — returns when user hits OK, X, or B."""
+        p = self.pager
+        key = item.get('key', '')
+        buf = str(self.config.get(key, '') or '')
+        secret = bool(item.get('secret'))
+        label = item.get('label', 'Edit')
+        maxlen = int(item.get('max_length', 48))
+
+        rows = len(self._KB_ROWS)
+        cols = len(self._KB_ROWS[0])
+        cell_w = 40
+        cell_h = 28
+        grid_x0 = 20
+        grid_y0 = 80
+        sel_row, sel_col = 0, 0
+
+        c_label = self._color('category')
+        c_val = self._color('category_selected')
+        c_dim = self._color('dim')
+        c_cell = self._color('category')
+        c_cell_sel = self._color('category_selected')
+        fs = 18
+        cell_fs = 16
+
+        while True:
+            self._draw_bg()
+
+            # Header: label + current buffer (masked if secret)
+            p.draw_ttf(20, 40, f'{label}:', c_label, FONT_MENU, fs)
+            lw = p.ttf_width(f'{label}:', FONT_MENU, fs)
+            display = ('*' * len(buf)) if secret else buf
+            p.draw_ttf(20 + lw + 8, 40, display + '_', c_val, FONT_MENU, fs)
+
+            # Keyboard grid
+            for r in range(rows):
+                for c in range(cols):
+                    ch = self._KB_ROWS[r][c]
+                    x = grid_x0 + c * cell_w
+                    y = grid_y0 + r * cell_h
+                    is_sel = (r == sel_row and c == sel_col)
+                    if is_sel:
+                        p.fill_rect(x - 2, y - 2, cell_w - 4, cell_h - 4, p.rgb(40, 40, 40))
+                    color = c_cell_sel if is_sel else c_cell
+                    # Offset text for readability; multi-char labels smaller
+                    tfs = cell_fs if len(ch) == 1 else cell_fs - 2
+                    p.draw_ttf(x + 6, y + 2, ch, color, FONT_MENU, tfs)
+
+            self._draw_widgets()
+            p.flip()
+
+            btn = wait_any_button(p)
+            if btn & p.BTN_UP:
+                sel_row = (sel_row - 1) % rows
+            elif btn & p.BTN_DOWN:
+                sel_row = (sel_row + 1) % rows
+            elif btn & p.BTN_LEFT:
+                sel_col = (sel_col - 1) % cols
+            elif btn & p.BTN_RIGHT:
+                sel_col = (sel_col + 1) % cols
+            elif btn & p.BTN_A:
+                ch = self._KB_ROWS[sel_row][sel_col]
+                if ch == 'BK':
+                    buf = buf[:-1]
+                elif ch == 'SP':
+                    if len(buf) < maxlen:
+                        buf += ' '
+                elif ch == 'OK':
+                    self.config[key] = buf
+                    save_config(self.config)
+                    self._apply_side_effect(item)
+                    self._flash('Saved')
+                    return
+                elif ch == 'X':
+                    return
+                else:
+                    if len(buf) < maxlen:
+                        buf += ch
+            elif btn & p.BTN_B:
+                return
 
     def _service_state(self, name, process_name=None):
         """Return (running, enabled) tuple for an init.d service.
 
-        BusyBox init.d `running` is unreliable — many services default to
-        returning 0 even when nothing is up. Use `pidof` as ground truth
-        and fall back to init.d's answer only if the binary isn't found.
+        Values are cached forever once loaded. Cache is cleared only
+        when the user triggers a start/stop/enable/disable via
+        _service_action(), so navigating the list re-uses the same
+        dict lookups with zero subprocess spawns.
+
+        First-time load uses a batched shell probe that queries every
+        service the theme knows about in a SINGLE subprocess — MIPS
+        fork+exec is expensive so one spawn beats 14.
         """
         if not name:
             return (False, False)
-        path = f'/etc/init.d/{name}'
-        if not os.path.isfile(path):
-            return (False, False)
+        if not hasattr(self, '_svc_cache'):
+            self._svc_cache = {}
         proc = process_name or name
+        key = (name, proc)
+        if key in self._svc_cache:
+            return self._svc_cache[key]
+        # Cache miss — do a batch load of every service in the Services
+        # category so subsequent navigation is instant.
+        self._load_service_cache_batch()
+        return self._svc_cache.get(key, (False, False))
+
+    def _load_service_cache_batch(self):
+        """Batch-query running/enabled state for every service in the
+        Services category via a single shell subprocess."""
+        if not hasattr(self, '_svc_cache'):
+            self._svc_cache = {}
+        cfg = self._layout or {}
+        services = []
+        for cat in cfg.get('categories', []):
+            if cat.get('id') == 'services':
+                for item in cat.get('items', []):
+                    if item.get('type') == 'service':
+                        name = item.get('service_name', '')
+                        proc = item.get('process_name', name)
+                        if name:
+                            services.append((name, proc))
+                break
+        if not services:
+            return
+
+        # Shell script: for each (service, proc), emit a line
+        #   name|proc|run_rc|en_rc
+        lines = []
+        for svc, proc in services:
+            lines.append(
+                'name="{0}"; proc="{1}"; '
+                'if [ -f /etc/init.d/$name ]; then '
+                'pidof $proc >/dev/null 2>&1; r=$?; '
+                '/etc/init.d/$name enabled >/dev/null 2>&1; e=$?; '
+                'echo "$name|$proc|$r|$e"; '
+                'else echo "$name|$proc|1|1"; fi'.format(svc, proc)
+            )
+        script = '; '.join(lines)
         try:
-            r = subprocess.run(['pidof', proc], capture_output=True, timeout=2)
-            run = r.returncode == 0 and bool(r.stdout.strip())
+            r = subprocess.run(
+                ['sh', '-c', script], capture_output=True, text=True, timeout=8
+            )
+            for line in r.stdout.strip().split('\n'):
+                parts = line.split('|')
+                if len(parts) != 4:
+                    continue
+                svc, proc, rc_run, rc_en = parts
+                run = rc_run == '0'
+                en = rc_en == '0'
+                self._svc_cache[(svc, proc)] = (run, en)
         except Exception:
-            # pidof failed — fall back to init.d's (unreliable) answer
-            run = self._rc(path, 'running') == 0
-        en = self._rc(path, 'enabled') == 0
-        return (run, en)
+            # On failure, populate with False so we don't retry forever
+            for svc, proc in services:
+                self._svc_cache[(svc, proc)] = (False, False)
 
     def _rc(self, *args):
         try:
@@ -355,6 +508,9 @@ class SettingsUI:
             return False
         try:
             subprocess.run([path, action], capture_output=True, timeout=10)
+            # Invalidate cache so the next render shows fresh state
+            if hasattr(self, '_svc_cache'):
+                self._svc_cache.clear()
             return True
         except Exception:
             return False
@@ -449,6 +605,180 @@ class SettingsUI:
             else:
                 stop_web_ui()
                 self._flash('Web UI stopped')
+        if key == 'web_port':
+            # Bounce the web server so it rebinds on the new port
+            from wardrive.web_server import start_web_ui, stop_web_ui, is_running
+            if is_running():
+                stop_web_ui()
+                port = self.config.get('web_port', 1337)
+                start_web_ui(port=port)
+                self._flash(f"Web UI on :{port}")
+
+    def _do_vibrate(self, ms=500):
+        """Pulse the vibration motor.
+
+        On this hardware the motor driver only fires on GPIO
+        transitions — holding the line high for 800 ms produces a
+        split-second buzz because the driver de-energizes almost
+        immediately. A pulse train of ~100 ms pulses re-engages it on
+        every rising edge and produces a sustained vibration.
+
+        Runs in a shell subprocess (&) so the UI doesn't block.
+        """
+        if not self.config.get('vibrate_enabled', True):
+            return
+        # 150 ms per cycle × N cycles = total duration
+        pulses = max(1, int(round(ms / 150.0)))
+        cycle = ('echo 1 > /sys/class/gpio/vibrator/value; '
+                 'sleep 0.12; '
+                 'echo 0 > /sys/class/gpio/vibrator/value; '
+                 'sleep 0.03')
+        body = '; '.join([cycle] * pulses)
+        os.system(f'({body}) &')
+
+    def _pick_gps_device(self):
+        """Scan for GPS devices and let the user pick one. Mirrors
+        wardrive_ui's picker, shared via gps_utils."""
+        self._flash('Scanning for GPS...', 0.4)
+        devices = detect_gps_devices()
+        if not devices:
+            self._flash('No GPS devices found')
+            return
+
+        cfg = self._layout
+        fs = cfg.get('font_size', 18)
+        row_h = cfg.get('row_height', 22)
+        right_x = cfg.get('right_x', 220)
+        y_start = cfg.get('y_start', 52)
+
+        selected = 0
+        items = [(get_device_name(d), d) for d in devices]
+        items.append(("Back", None))
+
+        while True:
+            self._draw_bg()
+            for i, (label, _) in enumerate(items):
+                y = y_start + i * row_h
+                c = self._color('category_selected' if i == selected else 'category')
+                self.pager.draw_ttf(right_x, y, label, c, FONT_MENU, fs)
+            self._draw_widgets()
+            self.pager.flip()
+
+            btn = wait_any_button(self.pager)
+            if btn & self.pager.BTN_UP:
+                selected = (selected - 1) % len(items)
+            elif btn & self.pager.BTN_DOWN:
+                selected = (selected + 1) % len(items)
+            elif btn & self.pager.BTN_A:
+                dev = items[selected][1]
+                if dev is None:
+                    return
+                self.config['gps_device'] = dev
+                save_config(self.config)
+                self._flash(f"Set: {os.path.basename(dev)}")
+                return
+            elif btn & self.pager.BTN_B:
+                return
+
+    def _restart_gpsd(self):
+        """Restart gpsd with the currently configured device + baud."""
+        dev = self.config.get('gps_device') or '/dev/ttyACM0'
+        baud = self.config.get('gps_baud', 'auto')
+        baud_arg = '' if baud in ('auto', 0, '0') else f'-s {baud} '
+        os.system(f'killall gpsd 2>/dev/null; sleep 1; gpsd {baud_arg}{dev} 2>/dev/null &')
+        self._flash('gpsd restarted')
+
+    # -- WiFi scan + connect --
+
+    def _wifi_scan_connect(self):
+        """Run a WiFi scan, let the user pick a network, prompt for the
+        password via the on-screen keyboard, and commit the uci config."""
+        self._flash('Scanning WiFi...', 0.4)
+        networks = wifi_utils.scan_networks()
+        if not networks:
+            self._flash('No networks found')
+            return
+
+        cfg = self._layout
+        fs = cfg.get('font_size', 18)
+        row_h = cfg.get('row_height', 22)
+        right_x = cfg.get('right_x', 220)
+        y_start = cfg.get('y_start', 52)
+
+        # Show top 8 for readability
+        visible = networks[:10]
+        items = []
+        for n in visible:
+            ssid = n['ssid']
+            sig = n.get('signal', -100)
+            enc = n.get('enc', 'open')
+            label = f'{ssid[:14]} {sig}dBm {enc}'
+            items.append((label, n))
+        items.append(('Cancel', None))
+
+        selected = 0
+        while True:
+            self._draw_bg()
+            for i, (label, _) in enumerate(items):
+                y = y_start + i * row_h
+                if y > 190: break
+                color = self._color('category_selected' if i == selected else 'category')
+                self.pager.draw_ttf(right_x, y, label, color, FONT_MENU, fs)
+            self._draw_widgets()
+            self.pager.flip()
+
+            btn = wait_any_button(self.pager)
+            if btn & self.pager.BTN_UP:
+                selected = (selected - 1) % len(items)
+            elif btn & self.pager.BTN_DOWN:
+                selected = (selected + 1) % len(items)
+            elif btn & self.pager.BTN_A:
+                net = items[selected][1]
+                if net is None:
+                    return
+                # Ask for password via on-screen keyboard
+                enc = net.get('enc', 'open')
+                if enc == 'open':
+                    password = ''
+                else:
+                    tmp_item = {
+                        'key': '_wifi_tmp_password',
+                        'label': f"Password for {net['ssid'][:12]}",
+                        'secret': True,
+                    }
+                    # Pre-seed with empty so _edit_string starts clean
+                    self.config['_wifi_tmp_password'] = ''
+                    self._edit_string(tmp_item)
+                    password = self.config.get('_wifi_tmp_password', '')
+                    # Don't persist the temp key in settings
+                    self.config.pop('_wifi_tmp_password', None)
+                    save_config(self.config)
+
+                self._flash('Connecting...', 0.5)
+                enc_uci = 'psk2' if enc in ('wpa2', 'wpa') else ('none' if enc == 'open' else 'psk2')
+                ok = wifi_utils.connect_network(net['ssid'], password, enc_uci)
+                self._flash('Connected' if ok else 'Connect failed')
+                return
+            elif btn & self.pager.BTN_B:
+                return
+
+    def _wifi_hotspot_toggle(self):
+        """Enable/disable the WiFi hotspot, applying the saved SSID + password."""
+        enabled, cur_ssid, cur_key = wifi_utils.get_hotspot_state()
+        target_enabled = not enabled
+        if target_enabled:
+            ssid = self.config.get('hotspot_ssid', '') or cur_ssid or 'pager'
+            password = self.config.get('hotspot_password', '') or cur_key
+            if not password or len(password) < 8:
+                self._flash('Set 8+ char password first')
+                return
+            self._flash('Starting hotspot...', 0.5)
+            wifi_utils.set_hotspot(True, ssid=ssid, password=password)
+            self._flash(f'Hotspot on: {ssid}')
+        else:
+            self._flash('Stopping hotspot...', 0.3)
+            wifi_utils.set_hotspot(False)
+            self._flash('Hotspot off')
 
     # Map named RTTTL presets → melody strings or None (silent)
     _RTTTL_PRESETS = {
@@ -478,11 +808,19 @@ class SettingsUI:
         elif action == 'restore':
             self._restore_picker()
         elif action == 'test_vibrate':
-            try:
-                self.pager.vibrate(150)
-            except Exception:
-                pass
+            self._do_vibrate(800)
             self._flash('Vibrate')
+        elif action == 'gps_pick_device':
+            self._pick_gps_device()
+        elif action == 'gps_restart':
+            self._restart_gpsd()
+        elif action == 'wifi_status':
+            ssid = wifi_utils.get_client_status() or wifi_utils.get_client_ssid()
+            self._flash(f'SSID: {ssid}' if ssid else 'Not connected')
+        elif action == 'wifi_scan_connect':
+            self._wifi_scan_connect()
+        elif action == 'wifi_hotspot_toggle':
+            self._wifi_hotspot_toggle()
         elif action == 'test_beep':
             if not self.config.get('sound_enabled', True):
                 self._flash('Sound is off')
