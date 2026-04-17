@@ -101,22 +101,34 @@ def scan_categories():
     return categories
 
 
+def _normalize(s):
+    """Collapse underscores and spaces into a single form for
+    slug-safe comparison. Titles like "CONFIRMATION_DIALOG Example"
+    get mangled to "confirmation_dialog_example" by the theme target
+    system (spaces → underscores) and then back to
+    "confirmation dialog example" (underscores → spaces) in
+    navigate_to — losing the distinction between original underscores
+    and original spaces. Normalizing both sides to all-spaces-lowercase
+    makes the round-trip work regardless of which characters the
+    title contained."""
+    return s.lower().replace('_', ' ').strip()
+
+
 def find_payload(name):
-    """Find a payload by title (case-insensitive) or by directory name.
-    Used by the main-loop launch_<slug> dispatcher, which receives the
-    theme-mangled slug of the title. Returns PayloadInfo or None.
+    """Find a payload by title (case-insensitive, underscore-tolerant)
+    or by directory name. Used by the main-loop launch_<slug>
+    dispatcher, which receives the theme-mangled slug of the title.
+    Returns PayloadInfo or None.
     """
     if not name:
         return None
-    target = name.lower().strip()
+    target = _normalize(name)
     for _, payloads in scan_categories():
         for info in payloads:
-            if info.title.lower() == target:
+            if _normalize(info.title) == target:
                 return info
             # Also match the payload directory basename in case the
             # title got slug-mangled past recognition by the theme.
-            if os.path.basename(info.payload_dir).lower() == target.replace(' ', '_'):
-                return info
-            if os.path.basename(info.payload_dir).lower() == target:
+            if _normalize(os.path.basename(info.payload_dir)) == target:
                 return info
     return None

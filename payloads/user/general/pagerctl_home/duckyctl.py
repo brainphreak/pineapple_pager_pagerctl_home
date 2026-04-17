@@ -146,6 +146,18 @@ class PayloadRunner:
         env['PAYLOAD_LOG'] = '/tmp/payload.log'
         # Some duckyscript commands read this for verbose curl output.
         env.setdefault('HAK5_API_VERBOSE', '0')
+        # DuckyScript exit code constants from /lib/hak5/pineapple.sh.
+        # Payload scripts use these in `case $?` and `case "$resp"`
+        # to interpret results from CONFIRMATION_DIALOG, LIST_PICKER,
+        # etc. The stock launcher sources pineapple.sh before running
+        # payloads; we set them as env vars directly so they're
+        # available without sourcing the full file (which also pulls
+        # in bash functions we don't need).
+        env['DUCKYSCRIPT_USER_DENIED'] = '0'
+        env['DUCKYSCRIPT_USER_CONFIRMED'] = '1'
+        env['DUCKYSCRIPT_CANCELLED'] = '2'
+        env['DUCKYSCRIPT_REJECTED'] = '3'
+        env['DUCKYSCRIPT_ERROR'] = '4'
         return env
 
     def _read_loop(self):

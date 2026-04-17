@@ -58,6 +58,30 @@ def request_dialog(kind, data, timeout=600.0):
     return req.response
 
 
+# Spinner state — non-blocking, set by START_SPINNER/STOP_SPINNER,
+# polled by payload_run's render loop every frame.
+spinner_state = {
+    'active': False,
+    'text': '',
+    'id': 0,
+}
+_spinner_lock = threading.Lock()
+
+
+def spinner_start(text):
+    with _spinner_lock:
+        spinner_state['id'] += 1
+        spinner_state['text'] = text or ''
+        spinner_state['active'] = True
+        return str(spinner_state['id'])
+
+
+def spinner_stop(sid=None):
+    with _spinner_lock:
+        spinner_state['active'] = False
+        spinner_state['text'] = ''
+
+
 def cancel_all_dialogs():
     """Called by payload_run when a payload stops. Drains pending
     requests so their waiting handlers unblock with None."""
@@ -208,9 +232,13 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path == 'payload/interact/prompt':
             return self._dialog('prompt', data, fallback={'text': data.get('default', '')})
         if path == 'payload/interact/spinner/start':
-            return self._dialog('spinner_start', data, fallback={'id': '1', 'success': True})
+            text = data.get('text') or data.get('message') or data.get('title') or ''
+            sid = spinner_start(text)
+            _payload_log.add(f'[SPINNER] {text}', 'cyan')
+            return {'id': sid, 'success': True}
         if path.startswith('payload/interact/spinner/stop'):
-            return self._dialog('spinner_stop', data, fallback={'success': True})
+            spinner_stop(data.get('id'))
+            return {'success': True}
 
         # Payload config
         if path.startswith('payload/config'):
@@ -324,9 +352,19 @@ class ApiHandler(BaseHTTPRequestHandler):
         request. If no run loop is listening (timeout) or the payload
         is being stopped, return the fallback canned response so
         duckyscript commands still exit cleanly."""
+        # Debug: log what hak5cmd sent us
+        try:
+            _payload_log.add(f'[api] {kind} req={data}', 'gray')
+        except Exception:
+            pass
         response = request_dialog(kind, data, timeout=600.0)
         if response is None:
             return fallback or {'success': True}
+        # Debug: log what we're sending back
+        try:
+            _payload_log.add(f'[api] {kind} rsp={response}', 'gray')
+        except Exception:
+            pass
         return response
 
     def _log_interact(self, kind, data):

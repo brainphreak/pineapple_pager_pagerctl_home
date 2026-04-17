@@ -115,6 +115,59 @@ class _LogRender:
             pass
         self._loaded = True
 
+    def _render_spinner(self, text):
+        """Draw the Circuitry spinner — 4-frame pager icon animation
+        at (140, 40) cycling every 0.4s, with text label centered
+        INSIDE the icon (per spinner_text.json template: centered
+        within x=165..315, y=62..123). Called each render tick while
+        spinner_state['active'] is True."""
+        self._load_spinner_frames()
+        p = self.pager
+        try:
+            p.clear(0)
+            now = time.time()
+            if now - self._spinner_last_tick >= 0.4:
+                self._spinner_frame_idx = (
+                    (self._spinner_frame_idx + 1)
+                    % len(self._spinner_frames))
+                self._spinner_last_tick = now
+            frame = self._spinner_frames[self._spinner_frame_idx]
+            if frame is not None:
+                p.draw_image(140, 40, frame)
+            # Text centered inside the pager icon. The template
+            # bounds are x=165..315 (150 px wide), y=62..123.
+            # Word-wrap at 16 chars, small font, yellow.
+            if text:
+                max_chars = 16
+                lines = []
+                cur = ''
+                for word in text.split():
+                    if len(cur) + 1 + len(word) > max_chars:
+                        if cur:
+                            lines.append(cur)
+                        cur = word
+                    else:
+                        cur = (cur + ' ' + word).strip()
+                if cur:
+                    lines.append(cur)
+                # Center vertically in y=62..123 (61 px)
+                line_h = 14
+                total_h = len(lines) * line_h
+                start_y = 62 + (61 - total_h) // 2
+                text_color = p.rgb(255, 220, 50)
+                for i, line in enumerate(lines[:4]):
+                    # Center horizontally in x=165..315 (150 px)
+                    try:
+                        tw = p.ttf_width(line, FONT_MENU, 12)
+                    except Exception:
+                        tw = len(line) * 7
+                    lx = 165 + (150 - tw) // 2
+                    p.draw_ttf(lx, start_y + i * line_h, line,
+                               text_color, FONT_MENU, 12)
+            p.flip()
+        except Exception:
+            pass
+
     def add_stdout_line(self, text):
         """Called by duckyctl's on_line callback when bash prints via
         echo/printf. Routes into the shared api_server payload log so
@@ -132,9 +185,38 @@ class _LogRender:
         except Exception:
             return []
 
+    def _load_spinner_frames(self):
+        """Load the 4 Circuitry spinner frames if not already cached."""
+        if hasattr(self, '_spinner_frames'):
+            return
+        self._spinner_frames = []
+        for i in range(1, 5):
+            path = os.path.join(self.theme_dir, 'assets', 'spinner',
+                                f'spinner{i}.png')
+            try:
+                if os.path.isfile(path):
+                    self._spinner_frames.append(
+                        self.pager.load_image(path))
+                else:
+                    self._spinner_frames.append(None)
+            except Exception:
+                self._spinner_frames.append(None)
+        self._spinner_frame_idx = 0
+        self._spinner_last_tick = 0.0
+
     def render(self, title, status):
         self._load_assets()
         p = self.pager
+
+        # If a spinner is active, draw it instead of the normal log.
+        try:
+            import api_server as _api
+            if _api.spinner_state.get('active'):
+                self._render_spinner(_api.spinner_state.get('text', ''))
+                return
+        except Exception:
+            pass
+
         try:
             if self.bg_handle:
                 p.draw_image(0, 0, self.bg_handle)
@@ -261,18 +343,14 @@ class _DialogRunner:
         """Dispatch a DialogRequest to the right handler. On return the
         request's response/event are already set."""
         kind = req.kind
-        if kind in ('alert', 'warning', 'error'):
+        if kind in ('alert', 'warning', 'error', 'prompt'):
             self._alert(req)
         elif kind == 'confirm':
             self._confirm(req)
         elif kind in ('list', 'string'):
             self._list(req)
-        elif kind in ('prompt', 'number', 'ip', 'mac'):
-            self._prompt(req)
-        elif kind == 'spinner_start':
-            req.response = {'id': '1', 'success': True}
-        elif kind == 'spinner_stop':
-            req.response = {'success': True}
+        elif kind in ('number', 'ip', 'mac'):
+            self._keyboard(req)
         elif kind == 'wait_button':
             btn = self._wait_button()
             req.response = {'button': btn}
@@ -319,8 +397,10 @@ class _DialogRunner:
             _sub_vars(raw, subs)
             self._render_raw_screen(raw)
 
-        # Block until any button press.
-        self._wait_button()
+        # Block until A or B only — directional presses are ignored
+        # so accidental dpad taps don't dismiss the alert.
+        accept = self.pager.BTN_A | self.pager.BTN_B
+        self._wait_button(accept_mask=accept)
         req.response = {'success': True, 'button': 'A'}
 
     def _confirm(self, req):
@@ -328,40 +408,171 @@ class _DialogRunner:
                          'components/dialogs/confirmation_dialog.json')
         message = (req.data.get('message') or req.data.get('text') or
                    req.data.get('prompt') or 'Are you sure?')
+
+        try:
+            import api_server
+            api_server._payload_log.add(
+                f'[CONFIRM] {message}', 'yellow')
+        except Exception:
+            pass
+
         _play_alert_sound(self.pager, 'alert')
+
+        confirmed = False
+        pressed_b = False
+
         if raw is None:
-            self._simple_modal('Confirm', message + '  [A=yes  B=no]')
+            self._simple_modal('Confirm', message + '\n\nA = Yes    B = No')
+            accept = self.pager.BTN_A | self.pager.BTN_B
+            btn = self._wait_button(accept_mask=accept)
+            confirmed = bool(btn & self.pager.BTN_A)
+            pressed_b = bool(btn & self.pager.BTN_B)
         else:
             _sub_vars(raw, {
-                '$_INPUT': message, '$_INPUT_NAME': message,
+                '$_INPUT': message,
+                '$_INPUT_NAME': message,
                 '$_PAYLOAD_DESCRIPTION': message,
+                '$_CONFIRMATION_TEXT': message,
             })
-            self._render_raw_screen(raw)
-        btn = self._wait_button()
-        confirmed = bool(btn & self.pager.BTN_A)
-        req.response = {'confirmed': confirmed, 'button': 'A' if confirmed else 'B'}
+            items = raw.get('menu_items') or []
+            if not items:
+                for page in raw.get('pages') or []:
+                    items.extend(page.get('menu_items') or [])
+            num = len(items) if items else 2
+
+            sel, btn = self._navigate_dialog(raw, num)
+            pressed_b = bool(btn & self.pager.BTN_B)
+            if pressed_b:
+                confirmed = False
+            else:
+                sel_item = items[sel] if sel < len(items) else {}
+                sel_target = sel_item.get('target', '')
+                confirmed = (sel_target == 'confirm')
+
+        try:
+            import api_server
+            label = 'accepted' if confirmed else ('cancelled' if pressed_b else 'denied')
+            api_server._payload_log.add(f'  → {label}',
+                'green' if confirmed else 'red')
+        except Exception:
+            pass
+
+        # hak5cmd response field mapping:
+        #   {accepted: true}  → stdout "1" (USER_CONFIRMED), exit 0
+        #   {accepted: false} → stdout "0" (USER_DENIED), exit 0
+        #   {cancelled: true} → exit 2 (CANCELLED), no stdout
+        if pressed_b:
+            req.response = {'cancelled': True, 'success': True}
+        else:
+            req.response = {'accepted': confirmed, 'success': True}
 
     def _list(self, req):
-        # Minimal for now — return the default / first item.
-        opts = req.data.get('options') or req.data.get('items') or []
-        default = req.data.get('default') or (opts[0] if opts else '')
-        try:
-            import api_server
-            api_server._payload_log.add(
-                f'[LIST_PICKER] (stub) returning {default!r}', 'yellow')
-        except Exception:
-            pass
-        req.response = {'selected': default, 'text': default}
+        """LIST_PICKER / TEXT_PICKER — show a scrollable list of
+        options using pager_dialogs.popup_menu. Returns the selected
+        item's text in {selected: "..."}."""
+        import pager_dialogs
 
-    def _prompt(self, req):
-        default = req.data.get('default', '')
+        title = req.data.get('title') or req.data.get('message') or 'Select'
+        opts = req.data.get('items') or req.data.get('options') or []
+        default = req.data.get('default') or ''
+
+        if not opts:
+            req.response = {'cancelled': True, 'success': True}
+            return
+
         try:
             import api_server
             api_server._payload_log.add(
-                f'[PROMPT] (stub) returning {default!r}', 'yellow')
+                f'[LIST] {title} ({len(opts)} items)', 'cyan')
         except Exception:
             pass
-        req.response = {'text': default}
+
+        # Build (label, value) pairs for popup_menu.
+        items = [(str(o), str(o)) for o in opts]
+
+        def bg_drawer():
+            try:
+                self.pager.clear(0)
+            except Exception:
+                pass
+
+        result = pager_dialogs.popup_menu(
+            self.pager, title, items, bg_drawer=bg_drawer)
+
+        if result is None:
+            req.response = {'cancelled': True, 'success': True}
+        else:
+            req.response = {'selected': result, 'success': True}
+
+    def _keyboard(self, req):
+        """Handle PROMPT, IP_PICKER, MAC_PICKER, NUMBER_PICKER,
+        TEXT_PICKER — any command that needs the user to type a value.
+        Uses our existing pager_dialogs.edit_string on-screen keyboard.
+        The themed per-type keyboards (edit_ip_dialog, edit_mac_dialog,
+        etc.) can replace this later for a polished look; edit_string
+        is functional and universal for now."""
+        import pager_dialogs
+
+        prompt = (req.data.get('title') or req.data.get('message') or
+                  req.data.get('prompt') or 'Enter value')
+        # hak5cmd sends the default value under a type-specific key:
+        # ip_picker sends "ip", mac_picker sends "mac", number_picker
+        # sends "number", prompt/text sends "default" or "text".
+        default = (req.data.get('ip') or req.data.get('mac') or
+                   req.data.get('number') or req.data.get('default') or
+                   req.data.get('text') or '')
+
+        # Per-type keyboard JSON from the Circuitry theme.
+        kb_json_map = {
+            'ip':     'components/keyboards/ui_keyboard_ip.json',
+            'mac':    'components/keyboards/ui_keyboard_hex.json',
+            'number': 'components/keyboards/ui_keyboard_numeric.json',
+            'prompt': 'components/keyboards/ui_keyboard.json',
+            'string': 'components/keyboards/ui_keyboard.json',
+        }
+        kb_rel = kb_json_map.get(req.kind, 'components/keyboards/ui_keyboard.json')
+        kb_path = os.path.join(self.theme_dir, kb_rel)
+
+        try:
+            import api_server
+            api_server._payload_log.add(
+                f'[{req.kind.upper()}] {prompt}', 'cyan')
+        except Exception:
+            pass
+
+        result = pager_dialogs.themed_keyboard(
+            self.pager, prompt, default,
+            keyboard_json_path=kb_path,
+            theme_dir=self.theme_dir,
+        )
+
+        if result is None:
+            req.response = {'cancelled': True, 'success': True}
+        else:
+            # hak5cmd pickers echo the value back using the SAME
+            # field name the request sent the default in:
+            #   IP_PICKER  → {ip: "..."}
+            #   MAC_PICKER → {mac: "..."}
+            #   NUMBER     → {number: "..."}
+            #   PROMPT     → {text: "..."}
+            #   TEXT/STRING → {text: "..."}
+            field_map = {
+                'ip': 'ip',
+                'mac': 'mac',
+                'number': 'number',
+            }
+            field = field_map.get(req.kind, 'text')
+            value = result
+            # NUMBER_PICKER: hak5cmd expects an integer, not a string.
+            if req.kind == 'number':
+                try:
+                    value = int(result)
+                except (ValueError, TypeError):
+                    try:
+                        value = float(result)
+                    except (ValueError, TypeError):
+                        value = 0
+            req.response = {field: value, 'success': True}
 
     # --------------------------------------------------------------
     # Rendering helpers
@@ -370,16 +581,27 @@ class _DialogRunner:
     def _render_raw_screen(self, raw):
         """Render a theme JSON tree one-shot. Fire-and-forget — no
         animations, no status bar widgets. Good enough for alert
-        modals and confirmation dialogs."""
+        modals and confirmation dialogs.
+
+        Handles both layouts: top-level `menu_items` (alert dialogs)
+        and `pages[].menu_items` (confirmation dialog, etc.)."""
         p = self.pager
         try:
             bg = (raw.get('background') or {})
             for layer in bg.get('layers') or []:
                 self._draw_layer(layer)
-            for item in raw.get('menu_items') or []:
-                # Unselected layers for every item, selected for item 0.
-                layers = item.get('selected_layers') if (
-                    raw.get('menu_items') or [None])[0] is item else item.get('layers')
+
+            # Collect items from either top-level or pages array.
+            items = raw.get('menu_items') or []
+            if not items:
+                for page in raw.get('pages') or []:
+                    items.extend(page.get('menu_items') or [])
+
+            for idx, item in enumerate(items):
+                # Show all items visible — use selected_layers for
+                # the first item as the visual default selection.
+                layers = (item.get('selected_layers')
+                          if idx == 0 else item.get('layers'))
                 for layer in layers or []:
                     self._draw_layer(layer)
             p.flip()
@@ -477,8 +699,10 @@ class _DialogRunner:
         except Exception:
             pass
 
-    def _wait_button(self):
-        """Block until any physical button press and return the mask."""
+    def _wait_button(self, accept_mask=None):
+        """Block until a qualifying physical button press and return
+        the mask. If `accept_mask` is given, only those buttons are
+        accepted — directional presses are silently swallowed."""
         p = self.pager
         p.clear_input_events()
         while True:
@@ -487,9 +711,67 @@ class _DialogRunner:
                 if not ev:
                     break
                 btn, etype, _ = ev
-                if etype == PAGER_EVENT_PRESS:
+                if etype != PAGER_EVENT_PRESS:
+                    continue
+                if accept_mask is None or (btn & accept_mask):
                     return btn
             time.sleep(0.03)
+
+    def _navigate_dialog(self, raw, num_items):
+        """Full navigation loop for a dialog with multiple selectable
+        items. Renders the dialog, handles left/right/up/down to
+        switch selected item, and returns (selected_index, button)
+        when A or B is pressed.
+
+        selected_index is 0-based into the items list.
+        button is the raw pager button mask (BTN_A or BTN_B)."""
+        p = self.pager
+        sel = 0
+        p.clear_input_events()
+        self._render_dialog_with_selection(raw, sel)
+
+        while True:
+            while p.has_input_events():
+                ev = p.get_input_event()
+                if not ev:
+                    break
+                btn, etype, _ = ev
+                if etype != PAGER_EVENT_PRESS:
+                    continue
+                if btn & p.BTN_A:
+                    return sel, btn
+                if btn & p.BTN_B:
+                    return sel, btn
+                if btn & (p.BTN_LEFT | p.BTN_UP):
+                    sel = (sel - 1) % num_items
+                    self._render_dialog_with_selection(raw, sel)
+                elif btn & (p.BTN_RIGHT | p.BTN_DOWN):
+                    sel = (sel + 1) % num_items
+                    self._render_dialog_with_selection(raw, sel)
+            time.sleep(0.03)
+
+    def _render_dialog_with_selection(self, raw, selected_index):
+        """Render a theme dialog with the given item highlighted."""
+        p = self.pager
+        try:
+            bg = (raw.get('background') or {})
+            for layer in bg.get('layers') or []:
+                self._draw_layer(layer)
+
+            items = raw.get('menu_items') or []
+            if not items:
+                for page in raw.get('pages') or []:
+                    items.extend(page.get('menu_items') or [])
+
+            for idx, item in enumerate(items):
+                layers = (item.get('selected_layers')
+                          if idx == selected_index
+                          else item.get('layers'))
+                for layer in layers or []:
+                    self._draw_layer(layer)
+            p.flip()
+        except Exception:
+            pass
 
 
 def run(pager, info, theme_dir=None):

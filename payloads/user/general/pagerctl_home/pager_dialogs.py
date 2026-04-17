@@ -24,13 +24,35 @@ _KB_ROWS = [
     ['z','x','c','v','b','n','m','-','_','@','X'],
 ]
 
+_KB_ROWS_NUMERIC = [
+    ['7','8','9','BK'],
+    ['4','5','6','.'],
+    ['1','2','3','OK'],
+    ['0',' ',' ','X'],
+]
+
+_KB_ROWS_HEX = [
+    ['0','1','2','3','4','5','BK'],
+    ['6','7','8','9','A','B','SP'],
+    ['C','D','E','F',':','.','OK'],
+    [' ',' ',' ',' ',' ',' ','X'],
+]
+
 
 def edit_string(pager, prompt, current='', secret=False, max_length=48,
-                bg_drawer=None):
-    """Show an on-screen keyboard. Returns entered string or None."""
+                bg_drawer=None, keyboard=None):
+    """Show an on-screen keyboard. Returns entered string or None.
+
+    keyboard: optional layout override:
+      None or 'full' — full alphanumeric (default)
+      'numeric'      — 0-9 and . only (for IP/number entry)
+      'hex'          — 0-9 A-F : . (for MAC addresses)
+    """
+    kb = {'numeric': _KB_ROWS_NUMERIC,
+          'hex': _KB_ROWS_HEX}.get(keyboard, _KB_ROWS)
     buf = str(current or '')
-    rows = len(_KB_ROWS)
-    cols = len(_KB_ROWS[0])
+    rows = len(kb)
+    cols = len(kb[0])
     cell_w = 40
     cell_h = 28
     grid_x0 = 20
@@ -58,7 +80,7 @@ def edit_string(pager, prompt, current='', secret=False, max_length=48,
 
         for r in range(rows):
             for c in range(cols):
-                ch = _KB_ROWS[r][c]
+                ch = kb[r][c]
                 x = grid_x0 + c * cell_w
                 y = grid_y0 + r * cell_h
                 is_sel = (r == sel_row and c == sel_col)
@@ -80,7 +102,7 @@ def edit_string(pager, prompt, current='', secret=False, max_length=48,
         elif btn & pager.BTN_RIGHT:
             sel_col = (sel_col + 1) % cols
         elif btn & pager.BTN_A:
-            ch = _KB_ROWS[sel_row][sel_col]
+            ch = kb[sel_row][sel_col]
             if ch == 'BK':
                 buf = buf[:-1]
             elif ch == 'SP':
@@ -93,6 +115,139 @@ def edit_string(pager, prompt, current='', secret=False, max_length=48,
             else:
                 if len(buf) < max_length:
                     buf += ch
+        elif btn & pager.BTN_B:
+            return None
+
+
+def themed_keyboard(pager, prompt, default='', keyboard_json_path=None,
+                     theme_dir=''):
+    """Graphical keyboard using the Circuitry theme assets.
+
+    The keyboard JSON defines a background image (the full keyboard
+    layout), an input_area for the typed text, and a grid of key
+    definitions each with a highlight overlay image. Navigation is
+    via d-pad, A types the highlighted key, B cancels.
+
+    Returns the entered string, or None on cancel.
+    """
+    import json as _json
+
+    if not keyboard_json_path or not os.path.isfile(keyboard_json_path):
+        return edit_string(pager, prompt, default)
+
+    try:
+        with open(keyboard_json_path) as f:
+            kb_cfg = _json.load(f)
+    except Exception:
+        return edit_string(pager, prompt, default)
+
+    qwerty = kb_cfg.get('qwerty', {})
+    input_area = kb_cfg.get('input_area', {})
+    bg_layers = (qwerty.get('background', {}).get('layers') or [])
+    key_rows = qwerty.get('rows', [])
+
+    if not key_rows:
+        return edit_string(pager, prompt, default)
+
+    # Load background image
+    bg_handle = None
+    for layer in bg_layers:
+        ip = layer.get('image_path')
+        if ip:
+            full = os.path.join(theme_dir, ip)
+            if os.path.isfile(full):
+                try:
+                    bg_handle = pager.load_image(full)
+                except Exception:
+                    pass
+            break
+
+    # Load highlight overlay images (usually one shared image)
+    highlight_cache = {}
+    for row in key_rows:
+        for key in row:
+            for sl in key.get('selected_layers', []):
+                ip = sl.get('image_path')
+                if ip and ip not in highlight_cache:
+                    full = os.path.join(theme_dir, ip)
+                    if os.path.isfile(full):
+                        try:
+                            highlight_cache[ip] = pager.load_image(full)
+                        except Exception:
+                            highlight_cache[ip] = None
+
+    # Input area config
+    ia_x = input_area.get('x', 15)
+    ia_y = input_area.get('y', 15)
+    ia_max = input_area.get('max_characters', 24)
+
+    buf = str(default or '')
+    sel_row = 0
+    sel_col = 0
+    num_rows = len(key_rows)
+
+    label_c = pager.rgb(180, 180, 180)
+    val_c = pager.rgb(255, 220, 50)
+
+    while True:
+        # Draw background
+        if bg_handle:
+            pager.draw_image(0, 0, bg_handle)
+        else:
+            pager.clear(0)
+
+        # Draw prompt + current text in the input area
+        pager.draw_ttf(ia_x, ia_y, f'{prompt}: {buf}_',
+                       val_c, FONT_MENU, 16)
+
+        # Draw key highlight for current selection
+        row_keys = key_rows[sel_row]
+        if sel_col < len(row_keys):
+            key = row_keys[sel_col]
+            kx = key.get('x', 0)
+            ky = key.get('y', 0)
+            for sl in key.get('selected_layers', []):
+                ip = sl.get('image_path')
+                handle = highlight_cache.get(ip)
+                if handle:
+                    ox = sl.get('x', 0)
+                    oy = sl.get('y', 0)
+                    try:
+                        pager.draw_image(kx + ox, ky + oy, handle)
+                    except Exception:
+                        pass
+
+        pager.flip()
+
+        # Input
+        btn = wait_any_button(pager)
+        if btn & pager.BTN_UP:
+            sel_row = (sel_row - 1) % num_rows
+            sel_col = min(sel_col, len(key_rows[sel_row]) - 1)
+        elif btn & pager.BTN_DOWN:
+            sel_row = (sel_row + 1) % num_rows
+            sel_col = min(sel_col, len(key_rows[sel_row]) - 1)
+        elif btn & pager.BTN_LEFT:
+            num_cols = len(key_rows[sel_row])
+            sel_col = (sel_col - 1) % num_cols
+        elif btn & pager.BTN_RIGHT:
+            num_cols = len(key_rows[sel_row])
+            sel_col = (sel_col + 1) % num_cols
+        elif btn & pager.BTN_A:
+            key = key_rows[sel_row][sel_col]
+            kid = key.get('id', '')
+            if kid == 'done':
+                return buf
+            elif kid == 'backspace':
+                buf = buf[:-1]
+            elif kid == 'cancel':
+                return None
+            elif kid == 'space' or kid == ' ':
+                if len(buf) < ia_max:
+                    buf += ' '
+            elif len(kid) >= 1 and kid not in ('shift', 'symbols', 'letters'):
+                if len(buf) < ia_max:
+                    buf += kid
         elif btn & pager.BTN_B:
             return None
 
