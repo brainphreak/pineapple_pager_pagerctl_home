@@ -8,10 +8,23 @@ while keeping compatibility with its payload library.
 
 Pagerctl Home takes over the pager's display and input while running,
 replacing the stock home screen with a theme-engine-rendered UI. It
-owns the framebuffer via `libpagerctl.so`, serves the Hak5 duckyscript
-API over `/tmp/api.sock` for payloads that need it, and dispatches
-every screen/dialog/menu through JSON theme components so the whole
-UI can be re-skinned without touching Python.
+owns the framebuffer via `libpagerctl.so`, dispatches every
+screen/dialog/menu through JSON theme components (so the whole UI
+can be re-skinned without touching Python), and includes an
+*in-progress* Hak5 duckyscript API shim on `/tmp/api.sock` for
+compatibility with stock `payload.sh` payloads.
+
+> ⚠ **Duckyscript support is WIP / under development.** The shim
+> implements `LOG`, `ALERT`, `CONFIRM`, `LIST_PICKER`, `TEXT_PICKER`,
+> `IP_PICKER`, `MAC_PICKER`, `NUMBER_PICKER`, `PROMPT`, `SPINNER`,
+> `WAIT_FOR_INPUT`, and the core LED / vibrate / beeper commands —
+> but coverage is partial and bugs are likely. Classic
+> `payload.sh`-only payloads are hidden from the Payloads browser
+> by default for that reason (opt in via **Settings → General →
+> Show Classic Payloads**). For reliable integration, ship a
+> `pagerctl.sh` launcher (see PAYLOAD_AUTHORING.md). Full
+> duckyscript compatibility will promote classic payloads back to
+> first-class support once the remaining commands are wired.
 
 ## Screens
 

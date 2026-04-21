@@ -28,13 +28,14 @@ import pager_dialogs
 import theme_utils
 import screen_power
 
-from attacks import ssid_spam
+from attacks import ssid_spam, handshake
 
 
 # Maps Mode name → backend module. Only backends with working
 # implementations land here; other modes are still scaffolding.
 _ATTACK_BACKENDS = {
     'SSID Spam': ssid_spam,
+    'Handshake': handshake,
 }
 
 
