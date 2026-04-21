@@ -522,26 +522,20 @@ def stop():
 
 
 def is_running():
-    """Return True only if we think we're running AND the live
-    state backs it up (at least one phy*-ap interface in AP mode).
-    Flips the flag back to False if hostapd got wedged externally,
-    so the UI stops claiming RUNNING when nothing's actually
-    broadcasting."""
+    """True while our rotation thread is alive. We can't use
+    `iw dev | grep 'type AP'` here because the rotation itself does
+    `wifi down/up radio1` every MAC_ROTATE_EVERY ticks — the AP is
+    transiently absent during that 1-2s window and an iw-dev poll
+    that lands there would wrongly flip us to IDLE permanently.
+    Thread liveness is the accurate signal: if the thread is alive,
+    it's about to bring the AP back."""
     if not _state['running']:
         return False
-    try:
-        r = _run(['iw', 'dev'], timeout=3)
-        if r and r.returncode == 0:
-            text = r.stdout or ''
-            # Any line like "type AP" inside the iw dev output means
-            # at least one AP is up. Cheap, no-dependency check.
-            if 'type AP' in text:
-                return True
-            _state['running'] = False
-            _state['error_msg'] = 'hostapd AP vanished'
-    except Exception:
-        pass
-    return _state['running']
+    if _rotate_thread is not None and _rotate_thread.is_alive():
+        return True
+    _state['running'] = False
+    _state['error_msg'] = 'rotation thread exited'
+    return False
 
 
 def resume_if_running():
