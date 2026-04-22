@@ -60,14 +60,36 @@ def _launched_from_hak5_ui():
     result = False
     try:
         if os.path.isfile('/etc/init.d/pineapplepager'):
-            r = subprocess.run(['pgrep', '-f', 'launch_menu.py'],
-                               capture_output=True, timeout=3)
-            bootloader_alive = (r.returncode == 0)
-            result = not bootloader_alive
+            result = not _bootloader_process_running()
     except Exception:
         result = False
     _HAK5_CACHED = result
     return result
+
+
+def _bootloader_process_running():
+    """Walk /proc and return True if any live process's cmdline
+    contains 'launch_menu.py'. We can't use `pgrep -f` here because
+    the BusyBox pgrep on this device has a bug where -f matches any
+    process regardless of the pattern — which made every exit look
+    like we were under the bootloader and left the power menu
+    labeled 'Bootloader' even when launched from the Hak5 UI."""
+    my_pid = str(os.getpid())
+    try:
+        entries = os.listdir('/proc')
+    except Exception:
+        return False
+    for entry in entries:
+        if not entry.isdigit() or entry == my_pid:
+            continue
+        try:
+            with open(f'/proc/{entry}/cmdline', 'rb') as f:
+                cmdline = f.read().replace(b'\0', b' ').decode('utf-8', 'replace')
+        except Exception:
+            continue
+        if 'launch_menu.py' in cmdline:
+            return True
+    return False
 
 
 _HAK5_CACHED = None
