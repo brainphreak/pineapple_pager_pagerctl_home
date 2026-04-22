@@ -146,6 +146,33 @@ def load_settings():
     return defaults
 
 
+def _resolve_rtttl_melody(pager, name):
+    """Resolve a ringtone name to an RTTTL melody string, trying in
+    order: exact filename, name + .rtttl extension, then built-in
+    Pager class presets (RTTTL_TETRIS / RTTTL_LEVEL_UP / RTTTL_GAME_OVER
+    on the Pager class). Returns None if nothing matches. Lets a user
+    pick either a file-backed ringtone or a built-in preset without
+    the loader needing to care which."""
+    base = '/lib/pager/ringtones'
+    candidates = [name] if name.endswith('.rtttl') else [name, f'{name}.rtttl']
+    for c in candidates:
+        path = os.path.join(base, c)
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    return f.read().strip()
+            except Exception:
+                return None
+    preset_attr = {
+        'tetris': 'RTTTL_TETRIS',
+        'level up': 'RTTTL_LEVEL_UP',
+        'game over': 'RTTTL_GAME_OVER',
+    }.get(name.lower())
+    if preset_attr:
+        return getattr(type(pager), preset_attr, None)
+    return None
+
+
 def _play_boot_sound(pager):
     """Play the configured boot RTTTL melody once the pager is init'd.
 
@@ -163,11 +190,7 @@ def _play_boot_sound(pager):
         name = cfg.get('boot_sound') or ''
         if not name or name == 'None':
             return
-        path = os.path.join('/lib/pager/ringtones', name)
-        if not os.path.isfile(path):
-            return
-        with open(path) as f:
-            melody = f.read().strip()
+        melody = _resolve_rtttl_melody(pager, name)
         if melody:
             pager.play_rtttl(melody)
     except Exception:
