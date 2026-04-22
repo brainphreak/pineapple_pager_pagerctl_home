@@ -39,6 +39,44 @@ import api_server
 PAYLOAD_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(PAYLOAD_DIR, 'settings.json')
 
+
+def _exit_target_label():
+    """'Bootloader' when pagerctl_home was launched by the bootloader,
+    'Hak5 UI' when launched from the stock pineapplepager UI. The exit
+    action (`return 'exit'`) returns control to whatever parent process
+    spawned us, so the label just needs to match that parent.
+
+    Detection: read parent process's comm. Stock UI is pineapplepager;
+    bootloader launches us via its own python/shell, which reads as
+    something else. Default to 'Bootloader' when detection fails so
+    the auto-boot case (the common one) stays correct."""
+    try:
+        with open(f'/proc/{os.getppid()}/comm') as f:
+            parent = f.read().strip()
+    except Exception:
+        return 'Bootloader'
+    if 'pineapplepager' in parent.lower():
+        return 'Hak5 UI'
+    return 'Bootloader'
+
+
+def _patch_power_menu_exit_label(engine):
+    """Swap the power menu's Bootloader button text to match whichever
+    parent will actually be re-surfaced on exit. Runs each time the
+    power menu screen is loaded because _load_screen re-parses JSON
+    fresh and would otherwise reset the label back to 'Bootloader'."""
+    label = _exit_target_label()
+    screen = getattr(engine, 'current_screen', None)
+    if screen is None or getattr(screen, 'name', '') != 'power_menu':
+        return
+    for page in getattr(screen, 'pages', []):
+        for item in page:
+            if getattr(item, 'target', '') != 'function_bootloader':
+                continue
+            for layer in list(item.layers) + list(item.selected_layers):
+                if 'text' in layer:
+                    layer['text'] = label
+
 # Default theme — override with PAGERCTL_THEME env var
 THEME_DIR = os.environ.get('PAGERCTL_THEME',
     os.path.join(PAYLOAD_DIR, 'themes', 'Circuitry'))
@@ -480,6 +518,11 @@ def main():
         variables=variables,
         font_path=config.get('font_path')
     )
+
+    # Swap the power menu Bootloader label to 'Hak5 UI' when our parent
+    # is pineapplepager — since 'exit' returns to whichever parent
+    # launched us, the label just needs to match that.
+    engine.after_load_hook = lambda eng, scr: _patch_power_menu_exit_label(eng)
 
     # Screen power state machine: 'normal' → 'dim' → 'off'.
     # dim_timeout and screen_timeout are measured from last_activity.

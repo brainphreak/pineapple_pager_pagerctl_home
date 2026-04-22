@@ -306,6 +306,12 @@ class ThemeEngine:
         """Load screen from JSON and preload its images."""
         screen = load_screen(filepath)
         self.current_screen = screen
+        hook = getattr(self, 'after_load_hook', None)
+        if callable(hook):
+            try:
+                hook(self, screen)
+            except Exception:
+                pass
         self.renderer.preload(screen)
         self.dirty = True
         return screen
