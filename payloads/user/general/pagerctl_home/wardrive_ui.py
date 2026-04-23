@@ -1036,6 +1036,17 @@ class WardriveUI:
     def _start_threads(self):
         channels = self._get_channels()
         if self.config.get('scan_mode') == 'stealth':
+            # Passive mode needs a monitor netdev — SSID Spam can
+            # delete it and lose its restore snapshot across a
+            # reboot, leaving wlan1mon gone. Self-heal before we
+            # hand the iface to tcpdump, otherwise the whole scan
+            # silently produces 0 APs.
+            try:
+                from wardrive import wifi_utils as _wu
+                _wu.ensure_monitor_iface(
+                    self.config['capture_interface'], 'radio1')
+            except Exception:
+                pass
             self.scanner = PassiveScanner(
                 self.config['capture_interface'], channels,
                 self.config.get('hop_speed', 0.5),

@@ -54,6 +54,50 @@ def _wifi_reload():
         pass
 
 
+def _iface_exists(name):
+    try:
+        r = subprocess.run(['iw', 'dev', name, 'info'],
+                           capture_output=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_monitor_iface(iface='wlan1mon', radio='radio1'):
+    """Guarantee `iface` exists as a monitor on `radio`. Self-heals
+    the case where SSID Spam (or any other attack that snapshots +
+    modifies /etc/config/wireless) left the wifi-iface deleted and
+    its snapshot was lost — commonly a mid-run reboot, since the
+    snapshot lives in /tmp. Without this, wardrive's passive scanner
+    silently sees zero APs and the user thinks the hardware is dead.
+
+    Idempotent: exits fast if the netdev is already up. Returns True
+    if monitor is ready when we exit, False on timeout."""
+    if _iface_exists(iface):
+        return True
+    # Add the UCI section. Same shape as the stock openwrt default
+    # monitor iface on this hardware — mode=monitor, device=radio1,
+    # network=lan, disabled=0.
+    _uci_set(f'wireless.{iface}', 'wifi-iface')
+    _uci_set(f'wireless.{iface}.device', radio)
+    _uci_set(f'wireless.{iface}.mode', 'monitor')
+    _uci_set(f'wireless.{iface}.network', 'lan')
+    _uci_set(f'wireless.{iface}.disabled', '0')
+    # Without `ifname` netifd auto-picks a name like phy1-mon0, which
+    # wardrive's capture_interface setting doesn't match. Pin it.
+    _uci_set(f'wireless.{iface}.ifname', iface)
+    _uci_commit('wireless')
+    _wifi_reload()
+    # wifi reload is async — hostapd/netifd needs a moment to bring
+    # the new netdev up. Poll up to ~5s before giving up.
+    import time as _t
+    for _ in range(10):
+        if _iface_exists(iface):
+            return True
+        _t.sleep(0.5)
+    return False
+
+
 # ----------------------------------------------------------------------
 # Client (STA) mode
 # ----------------------------------------------------------------------
