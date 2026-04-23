@@ -167,6 +167,11 @@
       "label": "WiFi",
       "items": [
         {
+          "label": "Restore Defaults",
+          "type": "action",
+          "action": "wifi_fix_net"
+        },
+        {
           "label": "Connected",
           "type": "live_value",
           "value_source": "wifi_ssid"
@@ -198,11 +203,6 @@
           "key": "hotspot_password",
           "type": "edit_string",
           "secret": true
-        },
-        {
-          "label": "Fix Net",
-          "type": "action",
-          "action": "wifi_fix_net"
         },
         {
           "label": "Wardrive 2.4GHz",
